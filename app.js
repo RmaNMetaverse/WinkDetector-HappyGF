@@ -24,19 +24,31 @@ document.addEventListener('DOMContentLoaded', () => {
   const LEFT_EYE = [33, 160, 158, 133, 153, 144];
   const RIGHT_EYE = [362, 385, 387, 263, 373, 380];
 
-  // Euclidean distance helper
+  // Detect mobile devices
+  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+
+  // Euclidean distance helper (pixel coordinates)
   function distance(p1, p2) {
-    return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+    const dx = p1.x - p2.x;
+    const dy = p1.y - p2.y;
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
-  // Calculate Eye Aspect Ratio
+  // Convert normalized landmark to pixel coords using current video size
+  function toPixel(landmark) {
+    const vw = videoElement.videoWidth || canvasElement.width || (isMobile ? 360 : 640);
+    const vh = videoElement.videoHeight || canvasElement.height || (isMobile ? 640 : 480);
+    return { x: landmark.x * vw, y: landmark.y * vh };
+  }
+
+  // Calculate Eye Aspect Ratio using pixel coords (fixes aspect-ratio issues on mobile)
   function getEAR(landmarks, indices) {
-    const p1 = landmarks[indices[0]];
-    const p2 = landmarks[indices[1]];
-    const p3 = landmarks[indices[2]];
-    const p4 = landmarks[indices[3]];
-    const p5 = landmarks[indices[4]];
-    const p6 = landmarks[indices[5]];
+    const p1 = toPixel(landmarks[indices[0]]);
+    const p2 = toPixel(landmarks[indices[1]]);
+    const p3 = toPixel(landmarks[indices[2]]);
+    const p4 = toPixel(landmarks[indices[3]]);
+    const p5 = toPixel(landmarks[indices[4]]);
+    const p6 = toPixel(landmarks[indices[5]]);
 
     const v1 = distance(p2, p6);
     const v2 = distance(p3, p5);
@@ -116,21 +128,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   faceMesh.setOptions({
     maxNumFaces: 1,
-    refineLandmarks: true,
+    // On mobile we reduce refinement for better performance
+    refineLandmarks: !isMobile,
     minDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5
   });
 
   faceMesh.onResults(onResults);
 
-  // Initialize Camera
+  // Initialize Camera with mobile-friendly defaults
   const camera = new Camera(videoElement, {
     onFrame: async () => {
-      await faceMesh.send({image: videoElement});
+      // Throttle processing on mobile to reduce CPU usage
+      if (shouldProcessFrame()) {
+        await faceMesh.send({image: videoElement});
+      }
+      frameCounter++;
     },
-    width: 640,
-    height: 480
+    // Prefer lower resolution on mobile for performance
+    width: isMobile ? 360 : 640,
+    height: isMobile ? 480 : 480,
+    facingMode: 'user'
   });
+
+  // Simple frame throttling
+  let frameCounter = 0;
+  const processEvery = isMobile ? 2 : 1; // process every 2nd frame on mobile
+  function shouldProcessFrame() {
+    return (frameCounter % processEvery) === 0;
+  }
 
   // Handle Canvas Resizing
   function resizeCanvas() {
